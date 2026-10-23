@@ -65,7 +65,8 @@ fi
 
 log "building $(git describe --tags) ..."
 rm -rf dist
-devbox run -- 'pnpm install --frozen-lockfile && pnpm run build:mac' >>"$LOG" 2>&1 \
+# Why mobile/: the mobile web bundle packed into the app resolves React Native from mobile/node_modules.
+devbox run -- 'pnpm install --frozen-lockfile && pnpm -C mobile install --frozen-lockfile && pnpm run build:mac' >>"$LOG" 2>&1 \
   || fail "build failed; see $LOG"
 
 built="$(find dist -maxdepth 2 -name Orca.app -type d | head -1)"

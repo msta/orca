@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Why: upstream's husky hook needs the devbox toolchain (Node 24, pnpm 12), which git hooks don't inherit.
+exec devbox run -- sh .husky/pre-commit

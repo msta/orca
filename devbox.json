@@ -1,3 +1,6 @@
 {
-  "packages": ["nodejs@24", "pnpm@12"]
+  "packages": ["nodejs@24", "pnpm@12"],
+  "env": {
+    "HUSKY": "0"
+  }
 }
