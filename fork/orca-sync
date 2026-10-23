@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Rebase the fork's patches onto the newest upstream Orca release, build, and install.
+#
+#   orca-sync            sync + build if upstream has a newer release, then install if Orca is closed
+#   orca-sync --force    rebuild even if already on the newest release (e.g. after adding a patch)
+#   orca-sync --install  install the last staged build (quit Orca first)
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+BRANCH=msta
+BASE_REF=refs/fork/base
+STAGE="$HOME/.local/share/orca-fork/Orca.app"
+TARGET=/Applications/Orca.app
+LOG="$HOME/.local/share/orca-fork/sync.log"
+
+mkdir -p "$(dirname "$STAGE")"
+cd "$REPO"
+
+log() { echo "[orca-sync $(date '+%F %T')] $*" | tee -a "$LOG"; }
+notify() { osascript -e "display notification \"$1\" with title \"orca-sync\"" >/dev/null 2>&1 || true; }
+fail() { log "FAIL: $1"; notify "$1"; exit 1; }
+
+install_staged() {
+  [[ -d "$STAGE" ]] || fail "no staged build at $STAGE"
+  if pgrep -xq Orca; then
+    log "Orca is running; staged build waits at $STAGE. Quit Orca, then: orca-sync --install"
+    notify "New fork build ready. Quit Orca, then run orca-sync --install"
+    return 0
+  fi
+  local backup="$HOME/.local/share/orca-fork/Orca.previous.app"
+  rm -rf "$backup"
+  [[ -d "$TARGET" ]] && mv "$TARGET" "$backup"
+  ditto "$STAGE" "$TARGET"
+  log "installed $(defaults read "$TARGET/Contents/Info.plist" CFBundleShortVersionString); previous app kept at $backup"
+  notify "Installed fork build"
+}
+
+case "${1:-}" in
+  --install) install_staged; exit 0 ;;
+  --force) FORCE=1 ;;
+  "") FORCE=0 ;;
+  *) echo "usage: orca-sync [--force|--install]" >&2; exit 2 ;;
+esac
+
+[[ "$(git branch --show-current)" == "$BRANCH" ]] || fail "repo not on $BRANCH"
+[[ -z "$(git status --porcelain --untracked-files=no)" ]] || fail "uncommitted changes in $REPO"
+
+git fetch -q upstream --tags
+latest="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+base="$(git rev-parse -q --verify "$BASE_REF" || true)"
+[[ -n "$base" ]] || fail "missing $BASE_REF; set it with: git update-ref $BASE_REF <release tag>"
+
+if [[ "$(git rev-parse "$latest^{commit}")" != "$base" ]]; then
+  log "rebasing $BRANCH onto $latest"
+  if ! git rebase -q --onto "$latest" "$base" "$BRANCH"; then
+    git rebase --abort
+    fail "patches conflict with $latest; resolve with: git rebase --onto $latest $BASE_REF $BRANCH"
+  fi
+  git update-ref "$BASE_REF" "$latest^{commit}"
+  git push -q --force-with-lease origin "$BRANCH" "$BASE_REF:$BASE_REF" || log "push to fork failed (non-fatal)"
+elif [[ "$FORCE" != 1 ]]; then
+  log "already on $latest; nothing to do"
+  exit 0
+fi
+
+log "building $(git describe --tags) ..."
+rm -rf dist
+devbox run -- 'pnpm install --frozen-lockfile && pnpm run build:mac' >>"$LOG" 2>&1 \
+  || fail "build failed; see $LOG"
+
+built="$(find dist -maxdepth 2 -name Orca.app -type d | head -1)"
+[[ -n "$built" ]] || fail "build produced no Orca.app; see $LOG"
+rm -rf "$STAGE"
+ditto "$built" "$STAGE"
+log "staged $(defaults read "$STAGE/Contents/Info.plist" CFBundleShortVersionString)"
+install_staged
