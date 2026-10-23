@@ -67,7 +67,7 @@ log "building $(git describe --tags) ..."
 rm -rf dist
 # Why only node/pnpm from devbox: its full shell exports a Nix SDKROOT/DEVELOPER_DIR that Xcode's swiftc rejects.
 toolpath="$(devbox run -- 'echo "$(dirname "$(command -v node)"):$(dirname "$(command -v pnpm)")"' 2>/dev/null | tail -1)"
-[[ "$toolpath" == /nix/store/* ]] || fail "could not resolve devbox node/pnpm"
+[[ -x "${toolpath%%:*}/node" ]] || fail "could not resolve devbox node/pnpm"
 # Why mobile/: the mobile web bundle packed into the app resolves React Native from mobile/node_modules.
 PATH="$toolpath:$PATH" HUSKY=0 bash -c \
   'pnpm install --frozen-lockfile && pnpm -C mobile install --frozen-lockfile && pnpm run build:mac' >>"$LOG" 2>&1 \
