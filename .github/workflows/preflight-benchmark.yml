@@ -1,110 +1,58 @@
-name: Preflight comparison
+name: WebKit setup comparison
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    paths:
-      - .github/workflows/preflight-benchmark.yml
-      - config/scripts/benchmark-preflight-*.mjs
-      - config/scripts/preflight-benchmark-command.mjs
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: preflight-comparison-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 env:
   ORCA_BACKGROUND_LAUNCH: '1'
 jobs:
-  compilers:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 25
+  mobile:
+    name: WebKit setup (${{ matrix.preparation }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        preparation: [baseline, prepared]
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ae799f15579ddc796399ee3e5b4b403d448145ac
           persist-credentials: false
+      - name: Record source and preparation
+        env:
+          PREPARATION: ${{ matrix.preparation }}
+        run: |
+          mkdir -p .build/webkit-comparison
+          git rev-parse HEAD | tee .build/webkit-comparison/source-sha.txt
+          printf '%s\n' "$PREPARATION" > .build/webkit-comparison/preparation.txt
       - uses: ./.github/actions/install-node-dependencies
         with:
           native-runtime: none
-          node-version: '24'
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: config/.bun-version
-      - name: Compare native and Bun typechecking
-        run: node config/scripts/benchmark-preflight-compilers.mjs
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            mobile/pnpm-lock.yaml
+      - name: Prepare Ubuntu mirrors and network waits
+        if: matrix.preparation == 'prepared'
+        run: bash .github/scripts/prepare-ubuntu-apt.sh
+      - name: Install WebKit for the drawer check
+        timeout-minutes: 10
+        run: pnpm exec playwright-core install --with-deps webkit
+      - uses: ./.github/actions/install-mobile-dependencies
+      - name: Resolve Chrome for the render check
+        run: |
+          chrome="$(command -v google-chrome || command -v google-chrome-stable)"
+          "$chrome" --version
+          echo "ORCA_MOBILE_WEB_RENDER_BROWSER=$chrome" >> "$GITHUB_ENV"
+      - name: Build and verify the app bundle
+        run: pnpm run build:mobile-web
+      - name: Builder, override census and render checks
+        env:
+          ORCA_MOBILE_WEB_APP_DEPS_REQUIRED: '1'
+        run: node config/scripts/run-mobile-web-app-checks.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: preflight-compilers
-          path: .build/preflight-benchmark/
-          retention-days: 30
-  static-analysis:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/install-node-dependencies
-        with:
-          native-runtime: none
-          node-version: '24'
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: config/.bun-version
-      - name: Compare anti-slop patch and script runtimes
-        run: node config/scripts/benchmark-preflight-static-analysis.mjs
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: preflight-static-analysis
-          path: .build/preflight-benchmark/
-          retention-days: 30
-  compatibility-imports:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          fetch-depth: 2
-      - uses: ./.github/actions/install-node-dependencies
-        with:
-          native-runtime: none
-          node-version: '24'
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: config/.bun-version
-      - name: Compare compatibility-import scan and runtimes
-        run: node config/scripts/benchmark-preflight-compat-boundary.mjs
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: preflight-compat-boundary
-          path: .build/preflight-benchmark/
-          retention-days: 30
-  localization-extraction:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 12
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/install-node-dependencies
-        with:
-          native-runtime: none
-          node-version: '24'
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: config/.bun-version
-      - name: Compare localization extraction runtimes and complete catalogs
-        run: node config/scripts/benchmark-preflight-localization-extraction.mjs
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: preflight-localization-extraction
-          path: .build/preflight-benchmark/
+          name: webkit-comparison-${{ matrix.preparation }}
+          path: .build/webkit-comparison/
           retention-days: 30
