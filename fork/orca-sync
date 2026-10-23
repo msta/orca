@@ -22,7 +22,9 @@ fail() { log "FAIL: $1"; notify "$1"; exit 1; }
 
 install_staged() {
   [[ -d "$STAGE" ]] || fail "no staged build at $STAGE"
-  if pgrep -xq Orca; then
+  # Why not pgrep -x: the long-running main process doesn't always report its name as "Orca".
+  if pgrep -fq "$TARGET/Contents/MacOS/Orca" \
+    || [[ "$(osascript -e 'application id "com.stablyai.orca" is running' 2>/dev/null)" != false ]]; then
     log "Orca is running; staged build waits at $STAGE. Quit Orca, then: orca-sync --install"
     notify "New fork build ready. Quit Orca, then run orca-sync --install"
     return 0
@@ -73,7 +75,9 @@ PATH="$toolpath:$PATH" HUSKY=0 bash -c \
   'pnpm run install:release && pnpm -C mobile install --frozen-lockfile && pnpm run build:mac' >>"$LOG" 2>&1 \
   || fail "build failed; see $LOG"
 
-built="$(find dist -maxdepth 2 -name Orca.app -type d | head -1)"
+# Why: electron-builder emits dist/mac (x64) and dist/mac-arm64; pick this machine's.
+[[ "$(uname -m)" == arm64 ]] && built=dist/mac-arm64/Orca.app || built=dist/mac/Orca.app
+[[ -d "$built" ]] || built=""
 [[ -n "$built" ]] || fail "build produced no Orca.app; see $LOG"
 rm -rf "$STAGE"
 ditto "$built" "$STAGE"
