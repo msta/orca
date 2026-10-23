@@ -70,7 +70,7 @@ toolpath="$(devbox run -- 'echo "$(dirname "$(command -v node)"):$(dirname "$(co
 [[ -x "${toolpath%%:*}/node" ]] || fail "could not resolve devbox node/pnpm"
 # Why mobile/: the mobile web bundle packed into the app resolves React Native from mobile/node_modules.
 PATH="$toolpath:$PATH" HUSKY=0 bash -c \
-  'pnpm install --frozen-lockfile && pnpm -C mobile install --frozen-lockfile && pnpm run build:mac' >>"$LOG" 2>&1 \
+  'pnpm run install:release && pnpm -C mobile install --frozen-lockfile && pnpm run build:mac' >>"$LOG" 2>&1 \
   || fail "build failed; see $LOG"
 
 built="$(find dist -maxdepth 2 -name Orca.app -type d | head -1)"
