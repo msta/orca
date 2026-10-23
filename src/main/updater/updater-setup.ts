@@ -143,6 +143,10 @@ export class UpdaterSetup extends UpdaterDownloadInstall {
     if (is.dev) {
       return
     }
+    // Why: fork builds (-local. versions) are refreshed by fork/orca-sync; an upstream release would overwrite the patches.
+    if (app.getVersion().includes('-local.')) {
+      return
+    }
 
     const autoUpdater = this.getAutoUpdater()
     configureMacShipItScheduling()
